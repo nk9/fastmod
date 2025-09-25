@@ -56,8 +56,7 @@ mod terminal;
 
 use rprompt::prompt_reply_stderr;
 use rprompt::prompt_reply_stdout;
-
-use crate::terminal::Color;
+use crate::terminal::print_bolded_diff_to_terminal;
 
 type Result<T> = ::std::result::Result<T, Error>;
 
@@ -524,19 +523,13 @@ impl Fastmod {
     }
 
     fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
-        for diff in diffs {
-            match diff {
-                DiffResult::Left(l) => {
-                    terminal::fg(Color::Red);
-                    println!("- {}", l);
-                    terminal::reset();
-                }
-                DiffResult::Both(l, _) => println!("  {}", l),
-                DiffResult::Right(r) => {
-                    terminal::fg(Color::Green);
-                    println!("+ {}", r);
-                    terminal::reset();
-                }
+        for window in diffs.windows(2) {
+            match window {
+                [DiffResult::Left(l), DiffResult::Right(r)] => {
+                    let _ = print_bolded_diff_to_terminal(l, r);
+                },
+                [DiffResult::Both(l, _), _] => println!("  {}", l),
+                _ => (),
             }
         }
     }

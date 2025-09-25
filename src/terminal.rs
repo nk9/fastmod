@@ -14,43 +14,79 @@
  * limitations under the License.
  */
 
-use std::io;
+use std::io::stdout;
 
-use crossterm::ExecutableCommand;
+use anyhow::Result;
+use crossterm::execute;
 use crossterm::style::SetForegroundColor;
-use crossterm::terminal::Clear;
-use crossterm::terminal::ClearType;
+use crossterm::style::SetAttribute;
+use crossterm::style::ResetColor;
+use crossterm::style::Color;
+use crossterm::style::Attribute;
+use crossterm::style::Print;
+use crossterm::terminal::{Clear, ClearType};
+use similar::{ChangeTag, TextDiff};
 
-pub enum Color {
-    Red,
-    Green,
-}
-
-impl Color {
-    pub fn to_crossterm_color(self) -> crossterm::style::Color {
-        match self {
-            Color::Red => crossterm::style::Color::DarkRed,
-            Color::Green => crossterm::style::Color::DarkGreen,
-        }
-    }
-}
 
 pub fn clear() {
-    if io::stdout().execute(Clear(ClearType::All)).is_err() {
+    if execute!(stdout(), Clear(ClearType::All)).is_err() {
         print!("{}", "\n".repeat(8));
     }
-}
-
-pub fn fg(color: Color) {
-    let _ = io::stdout().execute(SetForegroundColor(color.to_crossterm_color()));
-}
-
-pub fn reset() {
-    let _ = io::stdout().execute(SetForegroundColor(crossterm::style::Color::Reset));
 }
 
 pub fn size() -> Option<(usize, usize)> {
     crossterm::terminal::size()
         .ok()
         .map(|(w, h)| (w as usize, h as usize))
+}
+
+pub fn print_bolded_diff_to_terminal(before: &str, after: &str) -> Result<()> {
+    let mut stdout = stdout();
+    let diff = TextDiff::from_chars(before, after);
+
+    execute!(stdout, SetForegroundColor(Color::DarkRed), Print("- "))?;
+    for op in diff.ops() {
+        for change in diff.iter_changes(op) {
+            match change.tag() {
+                ChangeTag::Equal => {
+                    execute!(stdout, Print(change.value()))?;
+                }
+                ChangeTag::Delete => {
+                    execute!(
+                        stdout,
+                        SetAttribute(Attribute::Bold),
+                        Print(change.value()),
+                        SetAttribute(Attribute::Reset),
+                        SetForegroundColor(Color::DarkRed),
+                    )?;
+                }
+                ChangeTag::Insert => { /* Only show deleted chars for "before" line */ }
+            }
+        }
+    }
+    execute!(stdout, ResetColor, Print("\n"))?;
+
+    execute!(stdout, SetForegroundColor(Color::DarkGreen), Print("+ "))?;
+    for op in diff.ops() {
+        for change in diff.iter_changes(op) {
+            match change.tag() {
+                ChangeTag::Equal => {
+                    execute!(stdout, Print(change.value()))?;
+                }
+                ChangeTag::Insert => {
+                    execute!(
+                        stdout,
+                        SetAttribute(Attribute::Bold),
+                        Print(change.value()),
+                        SetAttribute(Attribute::Reset),
+                        SetForegroundColor(Color::DarkGreen),
+                    )?;
+                }
+                ChangeTag::Delete => { /* Only show added chars for "after" line */ }
+            }
+        }
+    }
+    execute!(stdout, ResetColor, Print("\n"))?;
+
+    Ok(())
 }
