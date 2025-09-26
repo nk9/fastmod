@@ -535,17 +535,16 @@ impl Fastmod {
         for window in diffs.windows(2) {
             if let [cl, cr] = window {
                 if cl.tag() == ChangeTag::Delete && cr.tag() == ChangeTag::Insert {
-                    self.print_bolded_diff(cl.value(), cr.value());
+                    self.print_bolded_lines_diff(cl.value(), cr.value());
                 } else if cl.tag() == ChangeTag::Equal {
                     print!("  {}", cl.value())
                 }
             }
         }
     }
-
-
-    fn print_bolded_diff(&self, before: &str, after: &str) {
-        let diff = TextDiff::from_chars(before, after);
+    
+    fn print_bolded_lines_diff(&self, original: &str, modified: &str) {
+        let diff = TextDiff::from_chars(original, modified);
 
         let print_change = |prefix: &str, color: Color, tag: ChangeTag| {
             fg(color);
