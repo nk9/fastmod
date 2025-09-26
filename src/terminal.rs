@@ -14,14 +14,24 @@
  * limitations under the License.
  */
 
-use anyhow::Result;
 use crossterm::style::SetForegroundColor;
 use crossterm::style::SetAttribute;
 use crossterm::style::ResetColor;
-use crossterm::style::Color;
 use crossterm::style::Attribute;
-use similar::{ChangeTag, TextDiff};
 
+pub enum Color {
+    Red,
+    Green,
+}
+
+impl Color {
+    pub fn to_crossterm_color(self) -> crossterm::style::Color {
+        match self {
+            Color::Red => crossterm::style::Color::DarkRed,
+            Color::Green => crossterm::style::Color::DarkGreen,
+        }
+    }
+}
 
 pub fn clear() {
     #[cfg(not(test))]
@@ -41,56 +51,25 @@ pub fn clear() {
     }
 }
 
+pub fn fg(color: Color) {
+        print!("{}", SetForegroundColor(color.to_crossterm_color()));
+}
+
+pub fn reset() {
+    print!("{}", ResetColor);
+}
+
 pub fn size() -> Option<(usize, usize)> {
     crossterm::terminal::size()
         .ok()
         .map(|(w, h)| (w as usize, h as usize))
 }
 
-pub fn print_bolded_diff_to_terminal(before: &str, after: &str) -> Result<()> {
-    let diff = TextDiff::from_chars(before, after);
-
-    print!("{}- ", SetForegroundColor(Color::DarkRed));
-    for op in diff.ops() {
-        for change in diff.iter_changes(op) {
-            match change.tag() {
-                ChangeTag::Equal => {
-                    print!("{}", change.value());
-                }
-                ChangeTag::Delete => {
-                    print!("{}{}{}{}",
-                        SetAttribute(Attribute::Bold),
-                        change.value(),
-                        SetAttribute(Attribute::Reset),
-                        SetForegroundColor(Color::DarkRed),
-                    );
-                }
-                ChangeTag::Insert => { /* Only show deleted chars for "before" line */ }
-            }
-        }
-    }
-    print!("{}\n", ResetColor);
-
-    print!("{}+ ", SetForegroundColor(Color::DarkGreen));
-    for op in diff.ops() {
-        for change in diff.iter_changes(op) {
-            match change.tag() {
-                ChangeTag::Equal => {
-                    print!("{}", change.value());
-                }
-                ChangeTag::Insert => {
-                    print!("{}{}{}{}",
-                        SetAttribute(Attribute::Bold),
-                        change.value(),
-                        SetAttribute(Attribute::Reset),
-                        SetForegroundColor(Color::DarkGreen),
-                    );
-                }
-                ChangeTag::Delete => { /* Only show added chars for "after" line */ }
-            }
-        }
-    }
-    print!("{}\n", ResetColor);
-
-    Ok(())
+pub fn print_colored_bold(val: &str, color: Color) {
+    print!("{}{}{}",
+        SetAttribute(Attribute::Bold),
+        val,
+        SetAttribute(Attribute::Reset),
+    );
+    fg(color);
 }

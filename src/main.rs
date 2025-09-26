@@ -51,12 +51,13 @@ use ignore::WalkState;
 use ignore::overrides::OverrideBuilder;
 use regex::Regex;
 use regex::RegexBuilder;
+use similar::{ChangeTag, TextDiff};
 
 mod terminal;
 
 use rprompt::prompt_reply_stderr;
 use rprompt::prompt_reply_stdout;
-use crate::terminal::print_bolded_diff_to_terminal;
+use crate::terminal::{fg, reset, print_colored_bold, Color};
 
 type Result<T> = ::std::result::Result<T, Error>;
 
@@ -526,13 +527,56 @@ impl Fastmod {
         for window in diffs.windows(2) {
             match window {
                 [DiffResult::Left(l), DiffResult::Right(r)] => {
-                    let _ = print_bolded_diff_to_terminal(l, r);
+                    let _ = Self::print_bolded_diff(l, r);
                 },
                 [DiffResult::Both(l, _), _] => println!("  {}", l),
                 _ => (),
             }
         }
     }
+
+    pub fn print_bolded_diff(before: &str, after: &str) -> Result<()> {
+        let diff = TextDiff::from_chars(before, after);
+
+        fg(Color::Red);
+        print!("- ");
+        for op in diff.ops() {
+            for change in diff.iter_changes(op) {
+                match change.tag() {
+                    ChangeTag::Equal => {
+                        print!("{}", change.value());
+                    }
+                    ChangeTag::Delete => {
+                        print_colored_bold(change.value(), Color::Red);
+                    }
+                    ChangeTag::Insert => { /* Only show deleted chars for "before" line */ }
+                }
+            }
+        }
+        reset();
+        println!();
+
+        fg(Color::Green);
+        print!("+ ");
+        for op in diff.ops() {
+            for change in diff.iter_changes(op) {
+                match change.tag() {
+                    ChangeTag::Equal => {
+                        print!("{}", change.value());
+                    }
+                    ChangeTag::Insert => {
+                        print_colored_bold(change.value(), Color::Green);
+                    }
+                    ChangeTag::Delete => { /* Only show added chars for "after" line */ }
+                }
+            }
+        }
+        reset();
+        println!();
+
+        Ok(())
+    }
+
 
     fn run_interactive(
         &mut self,
