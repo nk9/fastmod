@@ -19,6 +19,7 @@ use crossterm::style::SetAttribute;
 use crossterm::style::ResetColor;
 use crossterm::style::Attribute;
 
+#[derive(Clone)]
 pub enum Color {
     Red,
     Green,

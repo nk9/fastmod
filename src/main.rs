@@ -550,39 +550,28 @@ impl Fastmod {
     fn print_bolded_diff(&self, before: &str, after: &str) {
         let diff = TextDiff::from_chars(before, after);
 
-        fg(Color::Red);
-        print!("- ");
-        for op in diff.ops() {
-            for change in diff.iter_changes(op) {
-                match change.tag() {
-                    ChangeTag::Equal => {
-                        print!("{}", change.value());
+        let print_change = |prefix: &str, color: Color,tag: ChangeTag| {
+            fg(color.clone());
+            print!("{prefix}");
+            
+            for op in diff.ops() {
+                for change in diff.iter_changes(op) {
+                    match change.tag() {
+                        ChangeTag::Equal => {
+                            print!("{}", change.value());
+                        }
+                        t if t == tag => {
+                            print_colored_bold(change.value(), color.clone());
+                        }
+                        _ => ()
                     }
-                    ChangeTag::Delete => {
-                        print_colored_bold(change.value(), Color::Red);
-                    }
-                    ChangeTag::Insert => { /* Only show deleted chars for "before" line */ }
                 }
             }
-        }
-        reset();
+            reset();
+        };
 
-        fg(Color::Green);
-        print!("+ ");
-        for op in diff.ops() {
-            for change in diff.iter_changes(op) {
-                match change.tag() {
-                    ChangeTag::Equal => {
-                        print!("{}", change.value());
-                    }
-                    ChangeTag::Insert => {
-                        print_colored_bold(change.value(), Color::Green);
-                    }
-                    ChangeTag::Delete => { /* Only show added chars for "after" line */ }
-                }
-            }
-        }
-        reset();
+        print_change("- ", Color::Red, ChangeTag::Delete);
+        print_change("+ ", Color::Green, ChangeTag::Insert);
     }
 
     fn run_interactive(
