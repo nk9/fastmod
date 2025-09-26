@@ -22,7 +22,6 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::fs::read_to_string;
-use std::iter;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -38,7 +37,6 @@ use anyhow::ensure;
 use clap::App;
 use clap::Arg;
 use clap::crate_version;
-use diff::Result as DiffResult;
 use grep::regex::RegexMatcher;
 use grep::regex::RegexMatcherBuilder;
 use grep::searcher::BinaryDetection;
@@ -51,7 +49,7 @@ use ignore::WalkState;
 use ignore::overrides::OverrideBuilder;
 use regex::Regex;
 use regex::RegexBuilder;
-use similar::{ChangeTag, TextDiff};
+use similar::{Change, ChangeTag, TextDiff};
 
 mod terminal;
 
@@ -475,67 +473,81 @@ impl Fastmod {
         }
     }
 
-    fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<DiffResult<&'a str>> {
-        let mut diffs = diff::lines(orig, edit);
-        fn is_same(x: &DiffResult<&str>) -> bool {
-            match x {
-                DiffResult::Both(..) => true,
-                _ => false,
-            }
-        }
-        let lines_to_print = match terminal::size() {
-            Some((_w, h)) => h,
-            None => 25,
-        } - 20;
+    fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<Change<&'a str>> {
+        let diff = TextDiff::from_lines(orig, edit);
+        let all_changes: Vec<_> = diff.iter_all_changes().collect();
 
-        let num_prefix_lines = diffs.iter().take_while(|diff| is_same(diff)).count();
-        let num_suffix_lines = diffs.iter().rev().take_while(|diff| is_same(diff)).count();
+        // Calculate the number of unchanged lines at the beginning (prefix)
+        // and end (suffix) of the diff.
+        fn is_same(c: &Change<&str>) -> bool {
+            c.tag() == ChangeTag::Equal
+        }
+        let num_prefix_lines = all_changes.iter().take_while(|c| is_same(c)).count();
+        let num_suffix_lines = all_changes.iter().rev().take_while(|c| is_same(c)).count();
 
         // If the prefix is the length of the diff then the file matched <regex>
         // but applying <subst> didn't result in any changes, there are no diffs
         // to print so we return an empty Vec.
-        if diffs.len() == num_prefix_lines {
+        if all_changes.len() == num_prefix_lines {
             return vec![];
         }
 
-        let size_of_diff = diffs.len() - num_prefix_lines - num_suffix_lines;
+        // Determine the number of lines available in the terminal for the diff view.
+        let lines_to_print = match terminal::size() {
+            Some((_w, h)) => h as usize,
+            None => 25,
+        }
+        .saturating_sub(20); // Reserve 20 lines for other UI elements.
+
+        // The core diff section is between the prefix and suffix.
+        let size_of_diff = all_changes.len() - num_prefix_lines - num_suffix_lines;
+        // The remaining space can be used for context lines.
         let size_of_context = lines_to_print.saturating_sub(size_of_diff);
         let size_of_up_context = size_of_context / 2;
         let size_of_down_context = size_of_context / 2 + size_of_context % 2;
 
+        // Calculate the start and end indices to create a slice of the changes
+        // that includes the core diff and the desired context.
         let start_offset = num_prefix_lines.saturating_sub(size_of_up_context);
         let end_offset = min(
-            diffs.len(),
+            all_changes.len(),
             num_prefix_lines + size_of_diff + size_of_down_context,
         );
 
-        diffs.truncate(end_offset);
-        diffs.splice(..start_offset, iter::empty());
+        // If offsets are invalid (can happen if there's no diff), return empty.
+        if start_offset >= end_offset {
+            return vec![];
+        }
 
+        // Create the final vector from the calculated slice.
+        let final_changes = all_changes[start_offset..end_offset].to_vec();
+
+        // Re-add the original assertion to ensure the output length is within bounds.
         assert!(
-            diffs.len() <= max(lines_to_print, size_of_diff),
+            final_changes.len() <= max(lines_to_print, size_of_diff),
             "changeset too long: {} > max({}, {})",
-            diffs.len(),
+            final_changes.len(),
             lines_to_print,
             size_of_diff
         );
 
-        diffs
+        final_changes
     }
 
-    fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
+    fn print_diff<'a>(&self, diffs: &[Change<&'a str>]) {
         for window in diffs.windows(2) {
-            match window {
-                [DiffResult::Left(l), DiffResult::Right(r)] => {
-                    let _ = Self::print_bolded_diff(l, r);
-                },
-                [DiffResult::Both(l, _), _] => println!("  {}", l),
-                _ => (),
+            if let [cl, cr] = window {
+                if cl.tag() == ChangeTag::Delete && cr.tag() == ChangeTag::Insert {
+                    self.print_bolded_diff(cl.value(), cr.value());
+                } else if cl.tag() == ChangeTag::Equal {
+                    print!("  {}", cl.value())
+                }
             }
         }
     }
 
-    pub fn print_bolded_diff(before: &str, after: &str) -> Result<()> {
+
+    fn print_bolded_diff(&self, before: &str, after: &str) {
         let diff = TextDiff::from_chars(before, after);
 
         fg(Color::Red);
@@ -554,7 +566,6 @@ impl Fastmod {
             }
         }
         reset();
-        println!();
 
         fg(Color::Green);
         print!("+ ");
@@ -572,11 +583,7 @@ impl Fastmod {
             }
         }
         reset();
-        println!();
-
-        Ok(())
     }
-
 
     fn run_interactive(
         &mut self,
@@ -991,6 +998,10 @@ mod tests {
 
     use super::*;
 
+    fn diffs_as_tuples(diffs: Vec<Change<&str>>) -> Vec<(ChangeTag, &str)> {
+        diffs.iter().map(|c| (c.tag(), c.value())).collect()
+    }
+
     #[test]
     fn test_index_to_row_col() {
         assert_eq!(index_to_row_col("abc", 1), (0, 1));
@@ -1088,14 +1099,15 @@ mod tests {
     fn test_diff_with_unchanged_line_in_middle() {
         let fm = Fastmod::new(false, false, false, false);
         let diffs = fm.diffs_to_print("foo\nbar\nbaz", "bat\nbar\nqux");
+
         assert_eq!(
-            diffs,
+            diffs_as_tuples(diffs),
             vec![
-                DiffResult::Left("foo"),
-                DiffResult::Right("bat"),
-                DiffResult::Both("bar", "bar"),
-                DiffResult::Left("baz"),
-                DiffResult::Right("qux"),
+                (ChangeTag::Delete, "foo\n"),
+                (ChangeTag::Insert, "bat\n"),
+                (ChangeTag::Equal, "bar\n"),
+                (ChangeTag::Delete, "baz"),
+                (ChangeTag::Insert, "qux"),
             ]
         )
     }
