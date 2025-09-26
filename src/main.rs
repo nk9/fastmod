@@ -476,12 +476,16 @@ impl Fastmod {
     fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<Change<&'a str>> {
         let diff = TextDiff::from_lines(orig, edit);
         let all_changes: Vec<_> = diff.iter_all_changes().collect();
-
-        // Calculate the number of unchanged lines at the beginning (prefix)
-        // and end (suffix) of the diff.
         fn is_same(c: &Change<&str>) -> bool {
             c.tag() == ChangeTag::Equal
         }
+        let lines_to_print = match terminal::size() {
+            Some((_w, h)) => h,
+            None => 25,
+        } - 20;
+
+        // Calculate the number of unchanged lines at the beginning (prefix)
+        // and end (suffix) of the diff.
         let num_prefix_lines = all_changes.iter().take_while(|c| is_same(c)).count();
         let num_suffix_lines = all_changes.iter().rev().take_while(|c| is_same(c)).count();
 
@@ -491,13 +495,6 @@ impl Fastmod {
         if all_changes.len() == num_prefix_lines {
             return vec![];
         }
-
-        // Determine the number of lines available in the terminal for the diff view.
-        let lines_to_print = match terminal::size() {
-            Some((_w, h)) => h as usize,
-            None => 25,
-        }
-        .saturating_sub(20); // Reserve 20 lines for other UI elements.
 
         // The core diff section is between the prefix and suffix.
         let size_of_diff = all_changes.len() - num_prefix_lines - num_suffix_lines;
@@ -550,10 +547,10 @@ impl Fastmod {
     fn print_bolded_diff(&self, before: &str, after: &str) {
         let diff = TextDiff::from_chars(before, after);
 
-        let print_change = |prefix: &str, color: Color,tag: ChangeTag| {
+        let print_change = |prefix: &str, color: Color, tag: ChangeTag| {
             fg(color.clone());
             print!("{prefix}");
-            
+
             for op in diff.ops() {
                 for change in diff.iter_changes(op) {
                     match change.tag() {
