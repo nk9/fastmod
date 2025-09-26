@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-use crossterm::style::SetForegroundColor;
-use crossterm::style::SetAttribute;
-use crossterm::style::ResetColor;
 use crossterm::style::Attribute;
+use crossterm::style::ResetColor;
+use crossterm::style::SetAttribute;
+use crossterm::style::SetForegroundColor;
 
 #[derive(Copy, Clone)]
 pub enum Color {
@@ -37,9 +37,9 @@ impl Color {
 pub fn clear() {
     #[cfg(not(test))]
     {
-        use std::io::stdout;
         use crossterm::execute;
         use crossterm::terminal::{Clear, ClearType};
+        use std::io::stdout;
 
         if execute!(stdout(), Clear(ClearType::All)).is_err() {
             print!("{}", "\n".repeat(8));
@@ -53,7 +53,7 @@ pub fn clear() {
 }
 
 pub fn fg(color: Color) {
-        print!("{}", SetForegroundColor(color.to_crossterm_color()));
+    print!("{}", SetForegroundColor(color.to_crossterm_color()));
 }
 
 pub fn reset() {
@@ -67,7 +67,8 @@ pub fn size() -> Option<(usize, usize)> {
 }
 
 pub fn print_colored_bold(val: &str, color: Color) {
-    print!("{}{}{}",
+    print!(
+        "{}{}{}",
         SetAttribute(Attribute::Bold),
         val,
         SetAttribute(Attribute::Reset),

@@ -53,9 +53,9 @@ use similar::{Change, ChangeTag, TextDiff};
 
 mod terminal;
 
+use crate::terminal::{Color, fg, print_colored_bold, reset};
 use rprompt::prompt_reply_stderr;
 use rprompt::prompt_reply_stdout;
-use crate::terminal::{fg, reset, print_colored_bold, Color};
 
 type Result<T> = ::std::result::Result<T, Error>;
 
@@ -542,7 +542,7 @@ impl Fastmod {
             }
         }
     }
-    
+
     fn print_bolded_lines_diff(&self, original: &str, modified: &str) {
         let diff = TextDiff::from_chars(original, modified);
 
@@ -559,7 +559,7 @@ impl Fastmod {
                         t if t == tag => {
                             print_colored_bold(change.value(), color);
                         }
-                        _ => ()
+                        _ => (),
                     }
                 }
             }
