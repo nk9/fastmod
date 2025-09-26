@@ -548,7 +548,7 @@ impl Fastmod {
         let diff = TextDiff::from_chars(before, after);
 
         let print_change = |prefix: &str, color: Color, tag: ChangeTag| {
-            fg(color.clone());
+            fg(color);
             print!("{prefix}");
 
             for op in diff.ops() {
@@ -558,7 +558,7 @@ impl Fastmod {
                             print!("{}", change.value());
                         }
                         t if t == tag => {
-                            print_colored_bold(change.value(), color.clone());
+                            print_colored_bold(change.value(), color);
                         }
                         _ => ()
                     }
