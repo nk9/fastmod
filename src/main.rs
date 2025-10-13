@@ -15,7 +15,6 @@
  */
 
 use std::borrow::Cow;
-use std::cmp::max;
 use std::cmp::min;
 use std::collections::HashSet;
 use std::env;
@@ -427,8 +426,8 @@ impl Fastmod {
     ) -> Result<bool> {
         terminal::clear();
 
-        let diffs = self.diffs_to_print(old, new);
-        if diffs.is_empty() {
+        // short-circuit if there are no changes to be reviewed
+        if old == new {
             return Ok(false);
         }
 
@@ -437,7 +436,9 @@ impl Fastmod {
         } else {
             println!("{}:{}-{}", path.to_string_lossy(), start_line, end_line);
         }
-        self.print_diff(&diffs);
+
+        self.print_diff(old, new);
+
         let mut user_input = if self.yes_to_all {
             'y'
         } else {
@@ -473,101 +474,43 @@ impl Fastmod {
         }
     }
 
-    fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<Change<&'a str>> {
+    fn print_diff(&self, orig: &str, edit: &str) {
         let diff = TextDiff::from_lines(orig, edit);
-        let all_changes: Vec<_> = diff.iter_all_changes().collect();
-        fn is_same(c: &Change<&str>) -> bool {
-            c.tag() == ChangeTag::Equal
-        }
+
         let lines_to_print = match terminal::size() {
             Some((_w, h)) => h,
             None => 25,
         } - 20;
 
-        // Calculate the number of unchanged lines at the beginning (prefix)
-        // and end (suffix) of the diff.
-        let num_prefix_lines = all_changes.iter().take_while(|c| is_same(c)).count();
-        let num_suffix_lines = all_changes.iter().rev().take_while(|c| is_same(c)).count();
-
-        // If the prefix is the length of the diff then the file matched <regex>
-        // but applying <subst> didn't result in any changes, there are no diffs
-        // to print so we return an empty Vec.
-        if all_changes.len() == num_prefix_lines {
-            return vec![];
-        }
-
-        // The core diff section is between the prefix and suffix.
-        let size_of_diff = all_changes.len() - num_prefix_lines - num_suffix_lines;
-        // The remaining space can be used for context lines.
-        let size_of_context = lines_to_print.saturating_sub(size_of_diff);
-        let size_of_up_context = size_of_context / 2;
-        let size_of_down_context = size_of_context / 2 + size_of_context % 2;
-
-        // Calculate the start and end indices to create a slice of the changes
-        // that includes the core diff and the desired context.
-        let start_offset = num_prefix_lines.saturating_sub(size_of_up_context);
-        let end_offset = min(
-            all_changes.len(),
-            num_prefix_lines + size_of_diff + size_of_down_context,
-        );
-
-        // If offsets are invalid (can happen if there's no diff), return empty.
-        if start_offset >= end_offset {
-            return vec![];
-        }
-
-        // Create the final vector from the calculated slice.
-        let final_changes = all_changes[start_offset..end_offset].to_vec();
-
-        // Re-add the original assertion to ensure the output length is within bounds.
-        assert!(
-            final_changes.len() <= max(lines_to_print, size_of_diff),
-            "changeset too long: {} > max({}, {})",
-            final_changes.len(),
-            lines_to_print,
-            size_of_diff
-        );
-
-        final_changes
-    }
-
-    fn print_diff<'a>(&self, diffs: &[Change<&'a str>]) {
-        for window in diffs.windows(2) {
-            if let [cl, cr] = window {
-                if cl.tag() == ChangeTag::Delete && cr.tag() == ChangeTag::Insert {
-                    self.print_bolded_lines_diff(cl.value(), cr.value());
-                } else if cl.tag() == ChangeTag::Equal {
-                    print!("  {}", cl.value())
-                }
-            }
-        }
-    }
-
-    fn print_bolded_lines_diff(&self, original: &str, modified: &str) {
-        let diff = TextDiff::from_chars(original, modified);
-
-        let print_change = |prefix: &str, color: Color, tag: ChangeTag| {
-            fg(color);
-            print!("{prefix}");
-
-            for op in diff.ops() {
-                for change in diff.iter_changes(op) {
-                    match change.tag() {
-                        ChangeTag::Equal => {
-                            print!("{}", change.value());
+        for ops in diff.grouped_ops(lines_to_print / 2) {
+            for op in ops {
+                let changes: Vec<_> = diff.iter_inline_changes(&op).collect();
+                for change in changes {
+                    let color = match change.tag() {
+                        ChangeTag::Delete => Some(Color::Red),
+                        ChangeTag::Insert => Some(Color::Green),
+                        _ => None,
+                    };
+                    if let Some(color) = color {
+                        fg(color);
+                    }
+                    print!("{} ", change.tag());
+                    for (emphasized, value) in change.iter_strings_lossy() {
+                        if emphasized {
+                            if let Some(color) = color {
+                                print_colored_bold(&value, color);
+                            }
+                        } else {
+                            print!("{}", value);
                         }
-                        t if t == tag => {
-                            print_colored_bold(change.value(), color);
-                        }
-                        _ => (),
+                    }
+                    reset();
+                    if change.missing_newline() {
+                        println!();
                     }
                 }
             }
-            reset();
-        };
-
-        print_change("- ", Color::Red, ChangeTag::Delete);
-        print_change("+ ", Color::Green, ChangeTag::Insert);
+        }
     }
 
     fn run_interactive(
