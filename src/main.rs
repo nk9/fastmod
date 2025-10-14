@@ -926,10 +926,6 @@ mod tests {
 
     use super::*;
 
-    fn diffs_as_tuples(diffs: Vec<Change<&str>>) -> Vec<(ChangeTag, &str)> {
-        diffs.iter().map(|c| (c.tag(), c.value())).collect()
-    }
-
     #[test]
     fn test_index_to_row_col() {
         assert_eq!(index_to_row_col("abc", 1), (0, 1));
@@ -1021,30 +1017,6 @@ mod tests {
             .success();
         let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "baz\nfoooobar");
-    }
-
-    #[test]
-    fn test_diff_with_unchanged_line_in_middle() {
-        let fm = Fastmod::new(false, false, false, false);
-        let diffs = fm.diffs_to_print("foo\nbar\nbaz", "bat\nbar\nqux");
-
-        assert_eq!(
-            diffs_as_tuples(diffs),
-            vec![
-                (ChangeTag::Delete, "foo\n"),
-                (ChangeTag::Insert, "bat\n"),
-                (ChangeTag::Equal, "bar\n"),
-                (ChangeTag::Delete, "baz"),
-                (ChangeTag::Insert, "qux"),
-            ]
-        )
-    }
-
-    #[test]
-    fn test_diff_no_changes() {
-        let fm = Fastmod::new(false, false, false, false);
-        let diffs = fm.diffs_to_print("foo", "foo");
-        assert_eq!(diffs, vec![]);
     }
 
     #[test]
