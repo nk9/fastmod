@@ -48,7 +48,7 @@ use ignore::WalkState;
 use ignore::overrides::OverrideBuilder;
 use regex::Regex;
 use regex::RegexBuilder;
-use similar::{Change, ChangeTag, TextDiff};
+use similar::{ChangeTag, TextDiff};
 
 mod terminal;
 
@@ -196,7 +196,7 @@ fn index_to_row_col(s: &str, index: usize) -> (usize, usize) {
     (line_num, col as usize)
 }
 
-fn display_warning(error: &Error) -> DisplayWarning {
+fn display_warning(error: &Error) -> DisplayWarning<'_> {
     DisplayWarning { inner: error }
 }
 
