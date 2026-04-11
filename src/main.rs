@@ -48,7 +48,7 @@ use ignore::WalkState;
 use ignore::overrides::OverrideBuilder;
 use regex::Regex;
 use regex::RegexBuilder;
-use similar::{ChangeTag, TextDiff};
+use similar::{ChangeTag, InlineChangeMode, InlineChangeOptions, TextDiff};
 
 mod terminal;
 
@@ -482,10 +482,12 @@ impl Fastmod {
             None => 25,
         } - 20;
 
+        let mut options = InlineChangeOptions::new();
+        options.mode(InlineChangeMode::Chars).semantic_cleanup(true);
+
         for ops in diff.grouped_ops(lines_to_print / 2) {
             for op in ops {
-                let changes: Vec<_> = diff.iter_inline_changes(&op).collect();
-                for change in changes {
+                for change in diff.iter_inline_changes_with_options(&op, options) {
                     let color = match change.tag() {
                         ChangeTag::Delete => Some(Color::Red),
                         ChangeTag::Insert => Some(Color::Green),
