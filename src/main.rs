@@ -293,6 +293,41 @@ fn backward_to_char_boundary(s: &str, mut index: usize) -> usize {
     index
 }
 
+/// A single rendered line from a diff, with inline emphasis information.
+/// Each segment is (emphasized, text). Emphasized segments are the
+/// intra-line changed characters; unemphasized segments are context.
+#[derive(Debug, PartialEq)]
+struct DiffLine {
+    tag: ChangeTag,
+    segments: Vec<(bool, String)>,
+    missing_newline: bool,
+}
+
+/// Returns the diff lines to display for a change from `orig` to `edit`,
+/// limited to `lines_to_print` total lines including context.
+fn diff_lines(orig: &str, edit: &str, lines_to_print: usize) -> Vec<DiffLine> {
+    let diff = TextDiff::from_lines(orig, edit);
+    let mut options = InlineChangeOptions::new();
+    options.mode(InlineChangeMode::Chars).semantic_cleanup(true);
+
+    let mut result = Vec::new();
+    for ops in diff.grouped_ops(lines_to_print / 2) {
+        for op in ops {
+            for change in diff.iter_inline_changes_with_options(&op, options) {
+                result.push(DiffLine {
+                    tag: change.tag(),
+                    segments: change
+                        .iter_strings_lossy()
+                        .map(|(emp, s)| (emp, s.into_owned()))
+                        .collect(),
+                    missing_newline: change.missing_newline(),
+                });
+            }
+        }
+    }
+    result
+}
+
 impl Fastmod {
     fn new(accept_all: bool, hidden: bool, no_ignore: bool, print_changed_files: bool) -> Fastmod {
         Fastmod {
@@ -475,42 +510,33 @@ impl Fastmod {
     }
 
     fn print_diff(&self, orig: &str, edit: &str) {
-        let diff = TextDiff::from_lines(orig, edit);
-
         let lines_to_print = match terminal::size() {
             Some((_w, h)) => h,
             None => 25,
         } - 20;
 
-        let mut options = InlineChangeOptions::new();
-        options.mode(InlineChangeMode::Chars).semantic_cleanup(true);
-
-        for ops in diff.grouped_ops(lines_to_print / 2) {
-            for op in ops {
-                for change in diff.iter_inline_changes_with_options(&op, options) {
-                    let color = match change.tag() {
-                        ChangeTag::Delete => Some(Color::Red),
-                        ChangeTag::Insert => Some(Color::Green),
-                        _ => None,
-                    };
+        for line in diff_lines(orig, edit, lines_to_print) {
+            let color = match line.tag {
+                ChangeTag::Delete => Some(Color::Red),
+                ChangeTag::Insert => Some(Color::Green),
+                _ => None,
+            };
+            if let Some(color) = color {
+                fg(color);
+            }
+            print!("{} ", line.tag);
+            for (emphasized, value) in &line.segments {
+                if *emphasized {
                     if let Some(color) = color {
-                        fg(color);
+                        print_colored_bold(value, color);
                     }
-                    print!("{} ", change.tag());
-                    for (emphasized, value) in change.iter_strings_lossy() {
-                        if emphasized {
-                            if let Some(color) = color {
-                                print_colored_bold(&value, color);
-                            }
-                        } else {
-                            print!("{}", value);
-                        }
-                    }
-                    reset();
-                    if change.missing_newline() {
-                        println!();
-                    }
+                } else {
+                    print!("{}", value);
                 }
+            }
+            reset();
+            if line.missing_newline {
+                println!();
             }
         }
     }
@@ -1207,5 +1233,70 @@ mod tests {
         let file_path = dir.path().join("foo.txt");
         let new_contents = read_to_string(file_path).unwrap();
         assert_eq!(new_contents, "$foo.bar");
+    }
+
+    fn segments(line: &DiffLine) -> Vec<(bool, &str)> {
+        line.segments
+            .iter()
+            .map(|(e, s)| (*e, s.as_str()))
+            .collect()
+    }
+
+    // A single-character change should emphasize only the changed character
+    #[test]
+    fn test_char_level_emphasis_single_change() {
+        let lines = diff_lines("abcde\n", "abXde\n", 10);
+        let deleted = lines.iter().find(|l| l.tag == ChangeTag::Delete).unwrap();
+        let inserted = lines.iter().find(|l| l.tag == ChangeTag::Insert).unwrap();
+
+        assert_eq!(
+            segments(deleted),
+            vec![(false, "ab"), (true, "c"), (false, "de\n")]
+        );
+        assert_eq!(
+            segments(inserted),
+            vec![(false, "ab"), (true, "X"), (false, "de\n")]
+        );
+    }
+
+    // A word-level change should still produce correct char-level boundaries
+    #[test]
+    fn test_char_level_emphasis_partial_word() {
+        let lines = diff_lines("f(x) y\n", "f(z) y\n", 10);
+        let deleted = lines.iter().find(|l| l.tag == ChangeTag::Delete).unwrap();
+        let inserted = lines.iter().find(|l| l.tag == ChangeTag::Insert).unwrap();
+
+        assert_eq!(
+            segments(deleted),
+            vec![(false, "f("), (true, "x"), (false, ") y\n")]
+        );
+        assert_eq!(
+            segments(inserted),
+            vec![(false, "f("), (true, "z"), (false, ") y\n")]
+        );
+    }
+
+    #[test]
+    fn test_identical_input_no_changes() {
+        let lines = diff_lines("foo\nbar\n", "foo\nbar\n", 10);
+        assert!(!lines.iter().any(|l| l.tag != ChangeTag::Equal));
+    }
+
+    // Lines without a trailing newline SHOULD set missing_newline
+    #[test]
+    fn test_missing_newline_detected() {
+        let lines = diff_lines("foo", "bar", 10);
+        let changed: Vec<_> = lines.iter().filter(|l| l.tag != ChangeTag::Equal).collect();
+        assert!(!changed.is_empty());
+        assert!(changed.iter().all(|l| l.missing_newline));
+    }
+
+    // Lines with a trailing newline SHOULD NOT set missing_newline
+    #[test]
+    fn test_newline_terminated_not_missing() {
+        let lines = diff_lines("foo\n", "bar\n", 10);
+        let changed: Vec<_> = lines.iter().filter(|l| l.tag != ChangeTag::Equal).collect();
+        assert!(!changed.is_empty());
+        assert!(changed.iter().all(|l| !l.missing_newline));
     }
 }
